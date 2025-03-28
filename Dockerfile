@@ -12,6 +12,6 @@ COPY ./requirements.txt ./
 
 RUN pip install -r requirements.txt
 
-COPY dmi_ingester ./dmi_ingester
+COPY dmi_ingestor ./dmi_ingestor
 
-ENTRYPOINT [ "python", "/app/dmi_ingester/ingester.py"]
+ENTRYPOINT [ "python", "/app/dmi_ingestor/ingestor.py"]

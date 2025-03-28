@@ -1,0 +1,15 @@
+# Temporary Python files
+*.pyc
+*.egg-info/
+__pycache__/
+.ipynb_checkpoints/
+pip-wheel-metadata/
+
+# IDE
+.idea
+
+# Temporary virtual environment files
+/.cache/
+/.venv/
+/venv/
+tmp/
