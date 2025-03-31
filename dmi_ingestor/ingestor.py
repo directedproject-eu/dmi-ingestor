@@ -47,15 +47,18 @@ def netcdf_to_cog(input_file, output_file):
 def transform_cog_to_single_bands_and_upload_to_bucket(cog_file, folder_name, times, bucket_path=None, endpoint=None,
                                                        key=None, secret=None, upload=False):
     dataset = gdal.Open(cog_file)
+    forecasts = {}
     for band, t in enumerate(times):
         time_str = str(t).split('.')[0].replace("-", "").replace(":", "")
         output_file = os.path.join(folder_name, time_str + ".tif")
         gdal.Translate(output_file, dataset, bandList=[band+1], options=["BIGTIFF=YES"])
         if upload:
             upload_to_bucket(output_file, bucket_path + os.path.basename(output_file), endpoint, key, secret)
+            forecasts[time_str] = bucket_path + os.path.basename(output_file)
             if band % 10 == 0:
                 logger.info(f"Uploaded {band} of {len(times)} files.")
     dataset = None
+    return forecasts
 
 
 def upload_to_bucket(local_file, bucket_file, endpoint_url, key, secret):
@@ -134,10 +137,9 @@ if __name__ == "__main__":
         logger.info(f"Transform NetCDF to COG.")
         netcdf_to_cog(nc_filename, cog_filename)
         logger.info(f"Split COG into bands (time slices) and upload them to bucket.")
-        transform_cog_to_single_bands_and_upload_to_bucket(
+        data = transform_cog_to_single_bands_and_upload_to_bucket(
             cog_filename, base_data_dir, ds.time.values, bucket_path, bucket_endpoint, bucket_key, bucket_secret,
             upload)
-        data = {"available_forecasts": [str(t).split('.')[0] for t in ds.time.values]}
         with open(forecast_json_filename, "w", encoding="utf-8") as fp:
             json.dump(data, fp, indent=4)
         upload_to_bucket(forecast_json_filename, forecast_json_bucket_path, bucket_endpoint, bucket_key, bucket_secret)
