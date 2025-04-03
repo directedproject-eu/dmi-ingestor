@@ -1,5 +1,7 @@
 gdal==3.6.2
+pyproj
 requests
+rioxarray
 s3fs
 scipy
 xarray

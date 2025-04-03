@@ -6,6 +6,7 @@ from collections import namedtuple
 from io import BytesIO
 from urllib.parse import urlencode, urlunsplit
 
+import pyproj
 import requests
 import xarray
 from osgeo import gdal
@@ -23,6 +24,44 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# see https://opendatadocs.dmi.govcloud.dk/Data/Forecast_Data_Weather_Model_HARMONIE_DINI_IG
+LCC_DMI_WKT = """PROJCRS["DMI HARMONIE DINI lambert projection",
+BASEGEOGCRS["DMI HARMONIE DINI lambert CRS",
+    DATUM["DMI HARMONIE DINI lambert datum",
+        ELLIPSOID["Sphere",6371229,0,
+            LENGTHUNIT["metre",1,
+                ID["EPSG",9001]]]],
+    PRIMEM["Greenwich",0,
+        ANGLEUNIT["degree",0.0174532925199433,
+            ID["EPSG",9122]]]],
+CONVERSION["Lambert Conic Conformal (2SP)",
+    METHOD["Lambert Conic Conformal (2SP)",
+        ID["EPSG",9802]],
+    PARAMETER["Latitude of false origin",55.5,
+        ANGLEUNIT["degree",0.0174532925199433],
+        ID["EPSG",8821]],
+    PARAMETER["Longitude of false origin",-8,
+        ANGLEUNIT["degree",0.0174532925199433],
+        ID["EPSG",8822]],
+    PARAMETER["Latitude of 1st standard parallel",55.5,
+        ANGLEUNIT["degree",0.0174532925199433],
+        ID["EPSG",8823]],
+    PARAMETER["Latitude of 2nd standard parallel",55.5,
+        ANGLEUNIT["degree",0.0174532925199433],
+        ID["EPSG",8824]],
+    PARAMETER["Easting at false origin",0,
+        LENGTHUNIT["metre",1],
+        ID["EPSG",8826]],
+    PARAMETER["Northing at false origin",0,
+        LENGTHUNIT["metre",1],
+        ID["EPSG",8827]]],
+CS[Cartesian,2],
+    AXIS["(E)",east,
+        ORDER[1],
+        LENGTHUNIT["Metre",1]],
+    AXIS["(N)",north,
+        ORDER[2],
+        LENGTHUNIT["Metre",1]]]"""
 
 def delete_outdated_forecasts(bucket_path, endpoint_url, key, secret):
     logger.debug(f"Delete path {bucket_path} recursively.")
@@ -42,6 +81,13 @@ def netcdf_to_cog(input_file, output_file):
     options = gdal.TranslateOptions(format="COG", creationOptions=["COMPRESS=LZW"], outputSRS="EPSG:4326")
     gdal.Translate(output_file, dataset, options=options)
     dataset = None
+
+
+def reproject_from_lambert(xarray_dataset, crs_to="epsg:4326"):
+    crs_from = pyproj.CRS.from_wkt(LCC_DMI_WKT)
+    xarray_dataset.rio.write_crs(crs_from, inplace=True)
+    xarray_dataset = xarray_dataset.rio.reproject(crs_to)
+    return xarray_dataset
 
 
 def transform_cog_to_single_bands_and_upload_to_bucket(cog_file, folder_name, times, bucket_path=None, endpoint=None,
@@ -85,7 +131,7 @@ if __name__ == "__main__":
     bucket_secret = os.getenv("BUCKET_SECRET")
     upload = os.getenv("UPLOAD_TO_BUCKET", "true").lower() == "true"
     collection = os.getenv("COLLECTION", "dkss_if")
-    parameter = os.getenv("PARAMETER", "sea-mean-deviation")
+    parameters = os.getenv("PARAMETERS", "sea-mean-deviation")
     bbox = os.getenv("BBOX", "11.5,55.5,12.2,56.1")
     # Fixed parameters
     netloc = "dmigw.govcloud.dk"
@@ -95,51 +141,68 @@ if __name__ == "__main__":
     base_data_dir = "/app/data"
     nc_filename = os.path.join(base_data_dir, "temp.nc")
     cog_filename = os.path.join(base_data_dir, "temp.tif")
-    bucket_path = f"{bucket_name}/{bucket_base_path}/{collection}/{parameter}/"
     forecast_json_filename = os.path.join(base_data_dir, "forecasts.json")
-    forecast_json_bucket_path = bucket_path + "forecasts.json"
-    if not os.path.exists(base_data_dir):
-        os.makedirs(base_data_dir)
 
-    Parts = namedtuple(
-        typename='Components',
-        field_names=['scheme', 'netloc', 'path', 'query', 'fragment']
-    )
+    for parameter in parameters.split(","):
+        logger.info(f"Start ingesting data from collection '{collection}' for parameter '{parameter}'.")
+        bucket_path = f"{bucket_name}/{bucket_base_path}/{collection}/{parameter}/"
+        forecast_json_bucket_path = bucket_path + "forecasts.json"
+        if not os.path.exists(base_data_dir):
+            os.makedirs(base_data_dir)
 
-    query_params = {
-        "api-key": dmi_api_key,
-        "crs": "crs84",
-        "parameter-name": parameter,
-        "bbox": bbox,
-        "f": out_format
-    }
-
-    url = urlunsplit(
-        Parts(
-            scheme="https",
-            netloc=netloc,
-            path=f"{url_base_path}/{collection}/{request_type}",
-            query=urlencode(query_params),
-            fragment=''
+        Parts = namedtuple(
+            typename='Components',
+            field_names=['scheme', 'netloc', 'path', 'query', 'fragment']
         )
-    )
-    try:
-        logger.info(f"Request data from DMI API.")
-        response = requests.get(url)
-        response.raise_for_status()
-    except HTTPError as err:
-        logger.error(err)
-    else:
-        delete_outdated_forecasts(bucket_path, bucket_endpoint, bucket_key, bucket_secret)
-        ds = xarray.open_dataset(BytesIO(response.content))
-        logger.info(f"Save data to NetCDF.")
-        ds.to_netcdf(nc_filename)
-        logger.info(f"Transform NetCDF to COG.")
-        netcdf_to_cog(nc_filename, cog_filename)
-        logger.info(f"Split COG into bands (time slices) and upload them to bucket.")
-        data = transform_cog_to_single_bands_and_upload_to_bucket(
-            cog_filename, base_data_dir, ds.time.values, bucket_path, bucket_endpoint, bucket_key, bucket_secret,
-            upload)
-        with open(forecast_json_filename, "w", encoding="utf-8") as fp:
-            json.dump(data, fp, indent=4)
-        upload_to_bucket(forecast_json_filename, forecast_json_bucket_path, bucket_endpoint, bucket_key, bucket_secret)
+
+        if collection.startswith("harmonie"):
+            crs = "native"
+        else:
+            crs = "crs84"
+
+        query_params = {
+            "api-key": dmi_api_key,
+            "crs": crs,
+            "parameter-name": parameter,
+            "bbox": bbox,
+            "f": out_format
+        }
+
+        url = urlunsplit(
+            Parts(
+                scheme="https",
+                netloc=netloc,
+                path=f"{url_base_path}/{collection}/{request_type}",
+                query=urlencode(query_params),
+                fragment=''
+            )
+        )
+        try:
+            logger.info(f"Request data from DMI API.")
+            response = requests.get(url)
+            response.raise_for_status()
+        except HTTPError as err:
+            logger.error(err)
+        else:
+            delete_outdated_forecasts(bucket_path, bucket_endpoint, bucket_key, bucket_secret)
+            ds = xarray.open_dataset(BytesIO(response.content))
+            if collection.startswith("harmonie"):
+                ds = reproject_from_lambert(ds)
+            logger.info(f"Save data to NetCDF.")
+            ds.to_netcdf(nc_filename)
+            logger.info(f"Transform NetCDF to COG.")
+            netcdf_to_cog(nc_filename, cog_filename)
+            logger.info(f"Split COG into bands (time slices) and upload them to bucket.")
+            data = transform_cog_to_single_bands_and_upload_to_bucket(
+                cog_filename, base_data_dir, ds.time.values, bucket_path, bucket_endpoint, bucket_key,
+                bucket_secret, upload)
+            with open(forecast_json_filename, "w", encoding="utf-8") as fp:
+                json.dump(data, fp, indent=4)
+            upload_to_bucket(forecast_json_filename, forecast_json_bucket_path,
+                             bucket_endpoint, bucket_key, bucket_secret)
+            try:
+                os.remove(nc_filename)
+                os.remove(cog_filename)
+                os.remove(forecast_json_filename)
+            except Exception as err:
+                logger.warning(err)
