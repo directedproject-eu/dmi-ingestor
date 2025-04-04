@@ -90,8 +90,8 @@ def reproject_from_lambert(xarray_dataset, crs_to="epsg:4326"):
     return xarray_dataset
 
 
-def transform_cog_to_single_bands_and_upload_to_bucket(cog_file, folder_name, times, bucket_path=None, endpoint=None,
-                                                       key=None, secret=None, upload=False):
+def transform_cog_to_single_bands_and_upload_to_bucket(cog_file, folder_name, times, bucket_name=None, bucket_path=None,
+                                                       endpoint=None, key=None, secret=None, upload=False):
     dataset = gdal.Open(cog_file)
     forecasts = {}
     for band, t in enumerate(times):
@@ -99,8 +99,9 @@ def transform_cog_to_single_bands_and_upload_to_bucket(cog_file, folder_name, ti
         output_file = os.path.join(folder_name, time_str + ".tif")
         gdal.Translate(output_file, dataset, bandList=[band+1], options=["BIGTIFF=YES"])
         if upload:
-            upload_to_bucket(output_file, bucket_path + os.path.basename(output_file), endpoint, key, secret)
-            forecasts[time_str] = bucket_path + os.path.basename(output_file)
+            upload_to_bucket(output_file, f"{bucket_name}/{bucket_path}/{os.path.basename(output_file)}",
+                             endpoint, key, secret)
+            forecasts[time_str] = f"https://{bucket_name}.{endpoint.lstrip('https://')}/{bucket_path}/{os.path.basename(output_file)}"
             if band % 10 == 0:
                 logger.info(f"Uploaded {band} of {len(times)} files.")
     dataset = None
@@ -145,8 +146,9 @@ if __name__ == "__main__":
 
     for parameter in parameters.split(","):
         logger.info(f"Start ingesting data from collection '{collection}' for parameter '{parameter}'.")
-        bucket_path = f"{bucket_name}/{bucket_base_path}/{collection}/{parameter}/"
-        forecast_json_bucket_path = bucket_path + "forecasts.json"
+        bucket_path = f"{bucket_base_path}/{collection}/{parameter}"
+        bucket_path_full = f"{bucket_name}/{bucket_path}"
+        forecast_json_bucket_path = bucket_path_full + "/forecasts.json"
         if not os.path.exists(base_data_dir):
             os.makedirs(base_data_dir)
 
@@ -184,7 +186,7 @@ if __name__ == "__main__":
         except HTTPError as err:
             logger.error(err)
         else:
-            delete_outdated_forecasts(bucket_path, bucket_endpoint, bucket_key, bucket_secret)
+            delete_outdated_forecasts(bucket_path_full, bucket_endpoint, bucket_key, bucket_secret)
             ds = xarray.open_dataset(BytesIO(response.content))
             if collection.startswith("harmonie"):
                 ds = reproject_from_lambert(ds)
@@ -194,7 +196,7 @@ if __name__ == "__main__":
             netcdf_to_cog(nc_filename, cog_filename)
             logger.info(f"Split COG into bands (time slices) and upload them to bucket.")
             data = transform_cog_to_single_bands_and_upload_to_bucket(
-                cog_filename, base_data_dir, ds.time.values, bucket_path, bucket_endpoint, bucket_key,
+                cog_filename, base_data_dir, ds.time.values, bucket_name, bucket_path, bucket_endpoint, bucket_key,
                 bucket_secret, upload)
             with open(forecast_json_filename, "w", encoding="utf-8") as fp:
                 json.dump(data, fp, indent=4)
