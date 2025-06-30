@@ -71,9 +71,7 @@ def delete_outdated_forecasts(bucket_path, endpoint_url, key, secret):
 
 def netcdf_to_cog(input_file, output_file):
     dataset = gdal.Open(input_file)
-    options = gdal.TranslateOptions(
-        format="COG", creationOptions=["COMPRESS=LZW"], outputSRS="EPSG:4326"
-    )
+    options = gdal.TranslateOptions(format="COG", creationOptions=["COMPRESS=LZW"], outputSRS="EPSG:4326")
     gdal.Translate(output_file, dataset, options=options)
     dataset = None
 
@@ -101,9 +99,7 @@ def transform_cog_to_single_bands_and_upload_to_bucket(
     for band, t in enumerate(times):
         time_str = str(t).split(".")[0].replace("-", "").replace(":", "")
         output_file = os.path.join(folder_name, time_str + ".tif")
-        gdal.Translate(
-            output_file, dataset, bandList=[band + 1], options=["BIGTIFF=YES"]
-        )
+        gdal.Translate(output_file, dataset, bandList=[band + 1], options=["BIGTIFF=YES"])
         if upload:
             upload_to_bucket(
                 output_file,
@@ -113,7 +109,7 @@ def transform_cog_to_single_bands_and_upload_to_bucket(
                 secret,
             )
             forecasts[time_str] = (
-                f"https://{bucket_name}.{endpoint.lstrip('https://')}/{bucket_path}/{os.path.basename(output_file)}"
+                f"https://{bucket_name}.{endpoint.removeprefix('https://')}/{bucket_path}/{os.path.basename(output_file)}"
             )
             if band % 10 == 0:
                 logger.info(f"Uploaded {band} of {len(times)} files.")
@@ -134,9 +130,7 @@ if __name__ == "__main__":
     logger.info("Start ingesting DMI data.")
     # Configurable parameters
     dmi_api_key = os.getenv("DMI_API_KEY")
-    bucket_endpoint = os.getenv(
-        "BUCKET_ENDPOINT", "https://obs.eu-de.otc.t-systems.com"
-    )
+    bucket_endpoint = os.getenv("BUCKET_ENDPOINT", "https://obs.eu-de.otc.t-systems.com")
     bucket_name = os.getenv("BUCKET_NAME")
     bucket_base_path = os.getenv("BUCKET_BASE_PATH", "data/dmi/forecasts")
     bucket_key = os.getenv("BUCKET_KEY")
@@ -156,9 +150,7 @@ if __name__ == "__main__":
     forecast_json_filename = os.path.join(base_data_dir, "forecasts.json")
 
     for parameter in parameters.split(","):
-        logger.info(
-            f"Start ingesting data from collection '{collection}' for parameter '{parameter}'."
-        )
+        logger.info(f"Start ingesting data from collection '{collection}' for parameter '{parameter}'.")
         bucket_path = f"{bucket_base_path}/{collection}/{parameter}"
         bucket_path_full = f"{bucket_name}/{bucket_path}"
         forecast_json_bucket_path = bucket_path_full + "/forecasts.json"
@@ -199,9 +191,7 @@ if __name__ == "__main__":
         except HTTPError as err:
             logger.error(err)
         else:
-            delete_outdated_forecasts(
-                bucket_path_full, bucket_endpoint, bucket_key, bucket_secret
-            )
+            delete_outdated_forecasts(bucket_path_full, bucket_endpoint, bucket_key, bucket_secret)
             ds = xarray.open_dataset(BytesIO(response.content))
             if collection.startswith("harmonie"):
                 ds = reproject_from_lambert(ds)
@@ -209,9 +199,7 @@ if __name__ == "__main__":
             ds.to_netcdf(nc_filename)
             logger.info("Transform NetCDF to COG.")
             netcdf_to_cog(nc_filename, cog_filename)
-            logger.info(
-                "Split COG into bands (time slices) and upload them to bucket."
-            )
+            logger.info("Split COG into bands (time slices) and upload them to bucket.")
             data = transform_cog_to_single_bands_and_upload_to_bucket(
                 cog_filename,
                 base_data_dir,

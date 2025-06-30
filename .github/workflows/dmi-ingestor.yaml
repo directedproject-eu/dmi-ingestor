@@ -49,6 +49,13 @@ jobs:
         tags: |
           type=match,pattern=${{ env.METADATA_TAG_PATTERN }},group=1,value=${{ github.event.inputs.tags }}
     -
+      name: ruff formatting and linting
+      run: |
+        pip install ruff
+        ruff format --diff
+        ruff check
+        ruff check --select I
+    -
       name: Log in to Docker Hub
       if: github.event_name != 'pull_request'
       uses: docker/login-action@v3
