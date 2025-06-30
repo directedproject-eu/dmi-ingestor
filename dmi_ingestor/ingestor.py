@@ -17,7 +17,11 @@ from s3fs import S3FileSystem
 os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
 os.environ["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="[%(asctime)s | %(name)s::%(module)s.py:%(lineno)d | %(process)d] %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 # see https://opendatadocs.dmi.govcloud.dk/Data/Forecast_Data_Weather_Model_HARMONIE_DINI_IG
