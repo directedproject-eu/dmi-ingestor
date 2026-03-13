@@ -103,7 +103,8 @@ def transform_cog_to_single_bands_and_upload_to_bucket(
     for band, t in enumerate(times):
         time_str = str(t).split(".")[0].replace("-", "").replace(":", "")
         output_file = os.path.join(folder_name, time_str + ".tif")
-        gdal.Translate(output_file, dataset, bandList=[band + 1], options=["BIGTIFF=YES"])
+        options = gdal.TranslateOptions(bandList=[band + 1], creationOptions=["BIGTIFF=YES"])
+        gdal.Translate(output_file, dataset, options=options)
         if upload:
             upload_to_bucket(
                 output_file,
