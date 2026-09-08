@@ -134,7 +134,6 @@ def upload_to_bucket(local_file, bucket_file, endpoint_url, key, secret):
 if __name__ == "__main__":
     logger.info("Start ingesting DMI data.")
     # Configurable parameters
-    dmi_api_key = os.getenv("DMI_API_KEY")
     bucket_endpoint = os.getenv("BUCKET_ENDPOINT", "https://obs.eu-de.otc.t-systems.com")
     bucket_name = os.getenv("BUCKET_NAME")
     bucket_base_path = os.getenv("BUCKET_BASE_PATH", "data/dmi/forecasts")
@@ -145,7 +144,7 @@ if __name__ == "__main__":
     parameters = os.getenv("PARAMETERS", "sea-mean-deviation")
     bbox = os.getenv("BBOX", "11.5,55.5,12.2,56.1")
     # Fixed parameters
-    netloc = "dmigw.govcloud.dk"
+    netloc = "opendataapi.dmi.dk"
     url_base_path = "v1/forecastedr/collections"
     request_type = "cube"
     out_format = "NetCDF"  # the API is case-sensitive!
@@ -173,7 +172,6 @@ if __name__ == "__main__":
             crs = "crs84"
 
         query_params = {
-            "api-key": dmi_api_key,
             "crs": crs,
             "parameter-name": parameter,
             "bbox": bbox,
